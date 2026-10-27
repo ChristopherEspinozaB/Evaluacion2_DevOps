@@ -8,6 +8,16 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      modo_prueba:
+        description: "Selecciona la ejecución normal de pruebas o el error controlado"
+        required: true
+        type: choice
+        options:
+          - normal
+          - error
+        default: normal
 
 permissions:
   contents: read
@@ -137,6 +147,8 @@ jobs:
 
       - name: Validar secretos necesarios
         shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           set -Eeuo pipefail
 
@@ -149,8 +161,6 @@ jobs:
             echo "ERROR: falta configurar DB_PASSWORD."
             exit 1
           fi
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
       - name: Iniciar sesión en Docker Hub
         uses: docker/login-action@v3
@@ -218,9 +228,9 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          echo "========== ESPERAR SPRING BOOT =========="
+          echo "========== VERIFICAR SPRING BOOT =========="
 
-          intentos_maximos=60
+          intentos_maximos=3
           intento=1
           aplicacion_lista=false
 
@@ -259,7 +269,7 @@ jobs:
           done
 
           if [ "$aplicacion_lista" != true ]; then
-            echo "ERROR: Spring Boot no respondió dentro del tiempo permitido."
+            echo "ERROR: Spring Boot no respondió después de 3 intentos."
             echo "========== ESTADO DE LOS CONTENEDORES =========="
             docker compose ps -a
             echo "========== LOGS DE LA APLICACIÓN =========="
@@ -316,7 +326,87 @@ jobs:
           docker compose down -v --remove-orphans || true
 
   # ==========================================================
-  # 4. NOTIFICAR FALLOS MEDIANTE UNA ISSUE DE GITHUB
+  # 4. CASO DE ERROR CONTROLADO Y REGISTRO
+  # ==========================================================
+  test-controlled-failure:
+    name: Prueba de error controlado y logging
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.modo_prueba == 'error'
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Preparar registro de prueba
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p logs
+          {
+            echo "INICIO: prueba de error controlado"
+            echo "EJECUCION=${GITHUB_RUN_ID}"
+            echo "COMMIT=${GITHUB_SHA}"
+            echo "RAMA=${GITHUB_REF_NAME}"
+          } | tee logs/error-controlado.log
+
+      - name: Provocar error controlado
+        id: prueba
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          codigo_error="TEST_CONTROLLED_FAILURE"
+          causa="Fallo intencional para validar el registro de errores"
+
+          {
+            echo "ESTADO=ERROR"
+            echo "CODIGO=${codigo_error}"
+            echo "CAUSA=${causa}"
+            echo "PASO=Provocar error controlado"
+          } | tee -a logs/error-controlado.log
+
+          echo "::error title=${codigo_error}::${causa}"
+          exit 1
+
+      - name: Confirmar que el error fue detectado
+        if: always()
+        shell: bash
+        env:
+          RESULTADO_PRUEBA: ${{ steps.prueba.outcome }}
+        run: |
+          set -Eeuo pipefail
+
+          if [ "$RESULTADO_PRUEBA" = "failure" ]; then
+            echo "OK: se detectó el error controlado."
+            echo "Código: TEST_CONTROLLED_FAILURE"
+            echo "El registro se publicará como artefacto."
+          else
+            echo "ERROR: no se detectó el fallo esperado."
+            exit 1
+          fi
+
+      - name: Publicar registro del error controlado
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-controlado-log
+          path: logs/error-controlado.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Finalizar prueba con fallo intencional
+        if: always()
+        shell: bash
+        run: |
+          echo "ERROR: fallo controlado solicitado para demostrar el manejo de errores."
+          exit 1
+
+  # ==========================================================
+  # 5. NOTIFICAR FALLOS MEDIANTE UNA ISSUE DE GITHUB
   # ==========================================================
   notify-failure:
     name: Notificar fallo del pipeline
@@ -325,7 +415,26 @@ jobs:
       - test-quality
       - build-scan-push
       - deploy
-    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && (needs.test-quality.result == 'failure' || needs.build-scan-push.result == 'failure' || needs.deploy.result == 'failure')
+      - test-controlled-failure
+
+    if: >-
+      always() &&
+      (
+        (
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main' &&
+          (
+            needs.test-quality.result == 'failure' ||
+            needs.build-scan-push.result == 'failure' ||
+            needs.deploy.result == 'failure'
+          )
+        ) ||
+        (
+          github.event_name == 'workflow_dispatch' &&
+          inputs.modo_prueba == 'error' &&
+          needs.test-controlled-failure.result == 'failure'
+        )
+      )
 
     permissions:
       contents: read
@@ -334,6 +443,12 @@ jobs:
     steps:
       - name: Crear issue con el fallo
         uses: actions/github-script@v7
+        env:
+          TEST_QUALITY_RESULT: ${{ needs.test-quality.result }}
+          BUILD_RESULT: ${{ needs.build-scan-push.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          CONTROLLED_FAILURE_RESULT: ${{ needs.test-controlled-failure.result }}
+          MODO_PRUEBA: ${{ inputs.modo_prueba }}
         with:
           script: |
             const titulo = `CI/CD fallido: ${context.workflow} #${context.runNumber}`;
@@ -345,13 +460,15 @@ jobs:
               `- **Rama:** ${context.ref}`,
               `- **Commit:** ${context.sha}`,
               `- **Ejecución:** ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              `- **Modo de prueba:** ${process.env.MODO_PRUEBA || "push normal"}`,
               "",
               "### Resultado de los trabajos",
-              `- test-quality: ${"${{ needs.test-quality.result }}"}`,
-              `- build-scan-push: ${"${{ needs.build-scan-push.result }}"}`,
-              `- deploy: ${"${{ needs.deploy.result }}"}`,
+              `- test-quality: ${process.env.TEST_QUALITY_RESULT}`,
+              `- build-scan-push: ${process.env.BUILD_RESULT}`,
+              `- deploy: ${process.env.DEPLOY_RESULT}`,
+              `- test-controlled-failure: ${process.env.CONTROLLED_FAILURE_RESULT}`,
               "",
-              "Revisa los registros de la ejecución para identificar y corregir el error."
+              "Consulta los registros de la ejecución y descarga los artefactos disponibles para identificar la causa."
             ].join("\n");
 
             const existente = await github.rest.issues.listForRepo({
@@ -372,4 +489,8 @@ jobs:
                 title: titulo,
                 body: cuerpo
               });
+
+              core.info("OK: se creó una issue para documentar el fallo.");
+            } else {
+              core.info("OK: ya existe una issue para esta ejecución.");
             }
