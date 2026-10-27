@@ -59,13 +59,15 @@ jobs:
       - name: Instalar Snyk CLI
         run: npm install -g snyk@latest
 
-      - name: Diagnosticar Snyk
+
+      - name: Snyk dependencias (bloquea con severidad High o Critical)
+        working-directory: backend
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
-          snyk --version
-          snyk doctor
-          snyk test --debug --severity-threshold=high --file=backend/pom.xml
+          npm install -g snyk
+          snyk test --file=pom.xml --package-manager=maven --severity-threshold=high
+
 
   # ─────────────── 2. Imagen: build, escaneo y push ───────────────
   build-scan-push:
