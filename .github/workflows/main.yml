@@ -57,11 +57,11 @@ jobs:
           -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
 
       - name: Snyk dependencias (bloquea con severidad High o Critical)
+        uses: snyk/actions/maven@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: |
-          npm install -g snyk
-          snyk test --severity-threshold=high
+        with:
+          args: --severity-threshold=high --file=backend/pom.xml
 
   # ─────────────── 2. Imagen: build, escaneo y push ───────────────
   build-scan-push:
