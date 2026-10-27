@@ -1,34 +1,27 @@
-# Etapa 1: Build
+# ETAPA 1: Build
 FROM eclipse-temurin:21-jdk-alpine AS build
-
 WORKDIR /app
 
-# Copia los archivos del Maven Wrapper
 COPY .mvn/ .mvn
 COPY mvnw pom.xml ./
-
-# Da permisos de ejecución
-RUN chmod +x ./mvnw
-
-# Descarga las dependencias
+RUN sed -i 's/\r$//' mvnw && chmod +x mvnw
 RUN ./mvnw dependency:go-offline -B
 
-# Copia el código fuente
 COPY src ./src
+RUN ./mvnw clean package -DskipTests -B
 
-# Compila el proyecto
-RUN ./mvnw clean package -DskipTests
-
-# Etapa 2: Runtime
+# ETAPA 2: Runtime (liviana, sin root)
 FROM eclipse-temurin:21-jre-alpine
-
+RUN addgroup -S app && adduser -S app -G app
 WORKDIR /app
 
-# Copia el JAR compilado desde la etapa de build
 COPY --from=build /app/target/*.jar app.jar
+USER app
 
-# Expone el puerto
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=75"
 EXPOSE 8080
 
-# Comando para ejecutar la aplicación
-ENTRYPOINT ["java", "-jar", "app.jar"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
+  CMD wget -qO- http://localhost:8080/actuator/health || exit 1
+
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
