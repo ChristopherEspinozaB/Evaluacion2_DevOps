@@ -59,13 +59,16 @@ jobs:
       - name: Instalar Snyk CLI
         run: npm install -g snyk@latest
 
+      - name: Dar permisos al Maven Wrapper
+        run: chmod +x backend/mvnw
+
 
       - name: Snyk dependencias
         uses: snyk/actions/maven@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          args: --file=backend/pom.xml --severity-threshold=high --debug
+          args: --file=backend/pom.xml --org=84f62d21-f0bd-460a-aff6-eff80a88eb01 --severity-threshold=high
 
 
   # ─────────────── 2. Imagen: build, escaneo y push ───────────────
