@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: supletanes_db
       POSTGRES_USER: supletanes_user
-      POSTGRES_PASSWORD: ${PGPASSWORD:-supletanes_pass}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-supletanes_pass}
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -18,7 +18,8 @@ services:
         limits:
           cpus: "1.0"
           memory: 512M
-    networks: [backend]
+    networks:
+      - backend
 
   app:
     image: ${APP_IMAGE:-supletanes-app:local}
@@ -29,7 +30,9 @@ services:
       PGPORT: "5432"
       PGDATABASE: supletanes_db
       PGUSER: supletanes_user
-      PGPASSWORD: ${PGPASSWORD:-supletanes_pass}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/supletanes_db
+      SPRING_DATASOURCE_USERNAME: supletanes_user
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:-supletanes_pass}
     depends_on:
       postgres:
         condition: service_healthy
@@ -45,7 +48,9 @@ services:
         limits:
           cpus: "0.5"
           memory: 512M
-    networks: [backend, frontend]
+    networks:
+      - backend
+      - frontend
 
   proxy:
     image: nginx:1.27-alpine
@@ -61,7 +66,8 @@ services:
       resources:
         limits:
           memory: 64M
-    networks: [frontend]
+    networks:
+      - frontend
 
 networks:
   backend:

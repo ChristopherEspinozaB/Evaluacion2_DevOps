@@ -117,7 +117,7 @@ jobs:
 
     env:
       APP_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/supletanes-app:${{ github.sha }}
-      PGPASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
 
     steps:
       - name: Checkout
