@@ -1,0 +1,58 @@
+# ===================================
+# ANDROID STUDIO / GRADLE .gitignore
+# ===================================
+
+# Carpetas de configuración del IDE
+.idea/
+*.iml
+
+# Archivos de Gradle generados
+.gradle/
+build/
+**/build/
+!gradle-wrapper.jar
+
+# Archivos locales de configuración
+local.properties
+*.log
+
+# Cachés y archivos temporales
+.cxx/
+captures/
+*.class
+*.dex
+*.apk
+*.ap_ 
+*.aab
+
+# Archivos de Android Studio
+.DS_Store
+.externalNativeBuild/
+.navigation/
+.vscode/
+
+# Archivos del sistema operativo
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Archivos de firma y llaves
+*.jks
+*.keystore
+*.key
+*.pem
+
+# Configuración de dispositivos de prueba
+.idea/deploymentTargetSelector.xml
+.idea/deploymentTargetDropDown.xml
+.idea/shelf/
+
+# Archivos de salida del test
+outputs/
+reports/
+
+# Archivos de cache de lint y análisis
+lint/intermediates/
+lint/generated/
+lint/outputs/
+lint/tmp/
