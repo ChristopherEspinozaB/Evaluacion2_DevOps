@@ -148,52 +148,55 @@ jobs:
       - name: Levantar el stack y diagnosticar errores
         shell: bash
         run: |
-          set -e
+          set -Eeuo pipefail
 
-          echo "========== DESCARGANDO IMAGEN =========="
+          echo "========== VALIDAR CONFIGURACIÓN =========="
+          docker compose config -q
+
+          echo "========== DESCARGAR IMAGEN =========="
           docker compose pull app
 
-          echo "========== INICIANDO POSTGRES =========="
+          echo "========== INICIAR POSTGRES =========="
           docker compose up -d postgres
 
-          echo "========== ESPERANDO A POSTGRES =========="
-          postgres_ready=false
+          echo "========== ESPERAR POSTGRES =========="
+          POSTGRES_READY=false
 
           for i in $(seq 1 30); do
             if docker compose exec -T postgres \
               pg_isready -U supletanes_user -d supletanes_db; then
-              postgres_ready=true
+              POSTGRES_READY=true
               break
             fi
+
+            echo "Esperando PostgreSQL: intento $i de 30."
             sleep 2
           done
 
-          if [ "$postgres_ready" != "true" ]; then
+          if [ "$POSTGRES_READY" != "true" ]; then
             echo "ERROR: PostgreSQL no está preparado."
+            docker compose ps -a
             docker compose logs --no-color --tail=100 postgres
             exit 1
           fi
 
           echo "OK: PostgreSQL está preparado."
 
-          echo "========== INICIANDO APLICACION =========="
+          echo "========== INICIAR APLICACIÓN =========="
           if ! docker compose up -d --no-deps app; then
             echo "ERROR: no se pudo iniciar la aplicación."
             docker compose ps -a
             docker compose logs --no-color --tail=200 app
-            docker compose logs --no-color --tail=100 postgres
             exit 1
           fi
-
-          sleep 10
 
           echo "========== ESTADO DE CONTENEDORES =========="
           docker compose ps -a
 
-          echo "========== LOGS DE LA APLICACION =========="
+          echo "========== LOGS DE LA APLICACIÓN =========="
           docker compose logs --no-color --tail=200 app
 
-          echo "========== HEALTHCHECK DE LA APLICACION =========="
+          echo "========== HEALTHCHECK DE LA APLICACIÓN =========="
           for container in $(docker compose ps -aq app); do
             docker inspect "$container" \
               --format='Nombre: {{.Name}} Estado: {{.State.Status}} Salud: {{if .State.Health}}{{.State.Health.Status}}{{else}}sin healthcheck{{end}}'
@@ -205,12 +208,8 @@ jobs:
           echo "========== ESTADO DE POSTGRES =========="
           docker compose logs --no-color --tail=100 postgres
 
-
       - name: Iniciar Docker y verificar aplicación
-        working-directory: backend
-        env:
-          APP_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/supletanes-app:${{ github.sha }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        shell: bash
         run: |
           set -Eeuo pipefail
 
@@ -221,13 +220,14 @@ jobs:
           docker compose up -d postgres
 
           DB_READY=false
+
           for i in $(seq 1 30); do
-            if docker compose exec -T postgres pg_isready \
-              -U supletanes_user \
-              -d supletanes_db; then
+            if docker compose exec -T postgres \
+              pg_isready -U supletanes_user -d supletanes_db; then
               DB_READY=true
               break
             fi
+
             sleep 2
           done
 
@@ -242,74 +242,106 @@ jobs:
           docker compose pull app
           docker compose up -d --no-deps app
 
-          echo "========== ESTADO DE CONTENEDORES =========="
-          docker compose ps -a
-
-          echo "========== ESPERAR APLICACIÓN =========="
+          echo "========== ESPERAR SPRING BOOT =========="
           APP_READY=false
+          APP_CONTAINER=""
 
-          for i in $(seq 1 30); do
-            if curl --connect-timeout 3 --max-time 10 -fsS \
-              http://localhost:8080/actuator/health; then
-              echo
-              APP_READY=true
+          for i in $(seq 1 60); do
+            while IFS= read -r container; do
+              [ -n "$container" ] || continue
+
+              STATUS=$(docker inspect "$container" \
+                --format '{{.State.Status}}')
+
+              if [ "$STATUS" != "running" ]; then
+                continue
+              fi
+
+              APP_IP=$(docker inspect "$container" \
+                --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
+
+              if [ -z "$APP_IP" ]; then
+                continue
+              fi
+
+              if curl --connect-timeout 3 --max-time 10 -fsS \
+                "http://${APP_IP}:8080/actuator/health" \
+                -o /tmp/health.json; then
+                APP_READY=true
+                APP_CONTAINER="$container"
+                APP_IP_READY="$APP_IP"
+                break
+              fi
+            done < <(docker compose ps -q app)
+
+            if [ "$APP_READY" = "true" ]; then
               break
             fi
 
-            echo "Intento $i de 30: todavía no responde."
+            echo "Intento $i de 60: Spring Boot todavía no responde."
             sleep 5
           done
 
           if [ "$APP_READY" != "true" ]; then
-            echo "ERROR: No hay respuesta en localhost:8080."
-            echo "========== CONTENEDORES =========="
+            echo "ERROR: Spring Boot no respondió en el puerto interno 8080."
+            echo "========== ESTADO DE CONTENEDORES =========="
             docker compose ps -a
-            echo "========== LOGS DE APP =========="
+            echo "========== LOGS DE LA APLICACIÓN =========="
             docker compose logs --no-color --tail=200 app
             echo "========== LOGS DE POSTGRES =========="
             docker compose logs --no-color --tail=100 postgres
             exit 1
           fi
 
+          echo "OK: Spring Boot responde en el contenedor $APP_CONTAINER."
+          cat /tmp/health.json
+          echo
+
           echo "========== PROBAR CREACIÓN DE PRODUCTO =========="
-          code=$(curl --connect-timeout 5 --max-time 20 \
+          HTTP_CODE=$(curl --connect-timeout 5 --max-time 20 \
             -sS -o /tmp/producto.json -w "%{http_code}" \
-            -X POST http://localhost:8080/api/productos \
+            -X POST "http://${APP_IP_READY}:8080/api/productos" \
             -H "Content-Type: application/json" \
             -d '{"nombre":"Whey","descripcion":"Proteina","precio":25000,"stock":10,"categoria":"Proteinas"}')
 
-          if [ "$code" != "201" ]; then
-            echo "ERROR: Se esperaba HTTP 201 y se recibió HTTP $code."
+          if [ "$HTTP_CODE" != "201" ]; then
+            echo "ERROR: Se esperaba HTTP 201 y se recibió HTTP $HTTP_CODE."
             cat /tmp/producto.json
             exit 1
           fi
 
-          echo "========== PROBAR LISTADO =========="
+          echo "OK: producto creado."
+
+          echo "========== PROBAR LISTADO DE PRODUCTOS =========="
           curl --connect-timeout 5 --max-time 20 -fsS \
-            http://localhost:8080/api/productos > /tmp/productos.json
+            "http://${APP_IP_READY}:8080/api/productos" \
+            -o /tmp/productos.json
 
           if ! grep -q "Whey" /tmp/productos.json; then
-            echo "ERROR: El producto no aparece en el listado."
+            echo "ERROR: el producto no aparece en el listado."
             cat /tmp/productos.json
             exit 1
           fi
 
+          echo "OK: producto encontrado en el listado."
+
           echo "========== PROBAR FILTRO POR CATEGORÍA =========="
           curl --connect-timeout 5 --max-time 20 -fsS \
-            http://localhost:8080/api/productos/categoria/Proteinas \
-            > /tmp/productos_categoria.json
+            "http://${APP_IP_READY}:8080/api/productos/categoria/Proteinas" \
+            -o /tmp/productos_categoria.json
 
           if ! grep -q "Whey" /tmp/productos_categoria.json; then
-            echo "ERROR: El producto no aparece en el filtro por categoría."
+            echo "ERROR: el producto no aparece en el filtro por categoría."
             cat /tmp/productos_categoria.json
             exit 1
           fi
 
-          echo "OK: La aplicación respondió y todas las pruebas finalizaron correctamente."
-
+          echo "OK: el filtro por categoría funciona."
+          echo "OK: todas las pruebas finalizaron correctamente."
 
       - name: Logs si falla
         if: failure()
+        shell: bash
         run: |
           docker compose ps -a || true
           docker compose logs --no-color --tail=100 || true
