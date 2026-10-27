@@ -60,13 +60,12 @@ jobs:
         run: npm install -g snyk@latest
 
 
-      - name: Snyk dependencias (bloquea con severidad High o Critical)
+      - name: Snyk dependencias
         uses: snyk/actions/maven@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          command: test
-          args: --file=backend/pom.xml --severity-threshold=high
+          args: --file=backend/pom.xml --severity-threshold=high --debug
 
 
   # ─────────────── 2. Imagen: build, escaneo y push ───────────────
