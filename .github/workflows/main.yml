@@ -159,8 +159,6 @@ jobs:
           echo "========== ESTADO DE POSTGRES =========="
           docker compose logs --no-color --tail=100 postgres
 
-          exit 1
-
 
       - name: Smoke tests contra el balanceador
         run: |
