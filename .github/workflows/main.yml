@@ -205,71 +205,108 @@ jobs:
           echo "========== ESTADO DE POSTGRES =========="
           docker compose logs --no-color --tail=100 postgres
 
-      - name: Verificar aplicación y endpoints
-        shell: bash
+
+      - name: Iniciar Docker y verificar aplicación
+        working-directory: backend
+        env:
+          APP_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/supletanes-app:${{ github.sha }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
 
-          echo "Esperando a que la aplicación responda..."
+          echo "========== VALIDAR CONFIGURACIÓN =========="
+          docker compose config -q
 
-          app_ready=false
+          echo "========== INICIAR POSTGRESQL =========="
+          docker compose up -d postgres
 
+          DB_READY=false
           for i in $(seq 1 30); do
-            if curl -fsS http://localhost:8080/actuator/health; then
-              echo
-              app_ready=true
+            if docker compose exec -T postgres pg_isready \
+              -U supletanes_user \
+              -d supletanes_db; then
+              DB_READY=true
               break
             fi
-
-            sleep 5
+            sleep 2
           done
 
-          if [ "$app_ready" != "true" ]; then
-            echo "ERROR: la aplicación no respondió en /actuator/health."
-            docker compose logs --no-color --tail=200 app
+          if [ "$DB_READY" != "true" ]; then
+            echo "ERROR: PostgreSQL no está disponible."
+            docker compose ps -a
+            docker compose logs --no-color --tail=150 postgres
             exit 1
           fi
 
-          echo "Probando creación de producto..."
+          echo "========== INICIAR APLICACIÓN =========="
+          docker compose pull app
+          docker compose up -d --no-deps app
 
-          code=$(curl -sS -o /tmp/producto-respuesta.json \
-            -w "%{http_code}" \
+          echo "========== ESTADO DE CONTENEDORES =========="
+          docker compose ps -a
+
+          echo "========== ESPERAR APLICACIÓN =========="
+          APP_READY=false
+
+          for i in $(seq 1 30); do
+            if curl --connect-timeout 3 --max-time 10 -fsS \
+              http://localhost:8080/actuator/health; then
+              echo
+              APP_READY=true
+              break
+            fi
+
+            echo "Intento $i de 30: todavía no responde."
+            sleep 5
+          done
+
+          if [ "$APP_READY" != "true" ]; then
+            echo "ERROR: No hay respuesta en localhost:8080."
+            echo "========== CONTENEDORES =========="
+            docker compose ps -a
+            echo "========== LOGS DE APP =========="
+            docker compose logs --no-color --tail=200 app
+            echo "========== LOGS DE POSTGRES =========="
+            docker compose logs --no-color --tail=100 postgres
+            exit 1
+          fi
+
+          echo "========== PROBAR CREACIÓN DE PRODUCTO =========="
+          code=$(curl --connect-timeout 5 --max-time 20 \
+            -sS -o /tmp/producto.json -w "%{http_code}" \
             -X POST http://localhost:8080/api/productos \
             -H "Content-Type: application/json" \
             -d '{"nombre":"Whey","descripcion":"Proteina","precio":25000,"stock":10,"categoria":"Proteinas"}')
 
-          cat /tmp/producto-respuesta.json
-          echo
-
           if [ "$code" != "201" ]; then
-            echo "ERROR: se esperaba HTTP 201 y se recibió HTTP $code."
+            echo "ERROR: Se esperaba HTTP 201 y se recibió HTTP $code."
+            cat /tmp/producto.json
             exit 1
           fi
 
-          echo "Probando listado de productos..."
-
-          curl -fsS http://localhost:8080/api/productos \
-            -o /tmp/productos.json
+          echo "========== PROBAR LISTADO =========="
+          curl --connect-timeout 5 --max-time 20 -fsS \
+            http://localhost:8080/api/productos > /tmp/productos.json
 
           if ! grep -q "Whey" /tmp/productos.json; then
-            echo "ERROR: el producto Whey no aparece en el listado."
+            echo "ERROR: El producto no aparece en el listado."
             cat /tmp/productos.json
             exit 1
           fi
 
-          echo "Probando filtro por categoría..."
-
-          curl -fsS \
+          echo "========== PROBAR FILTRO POR CATEGORÍA =========="
+          curl --connect-timeout 5 --max-time 20 -fsS \
             http://localhost:8080/api/productos/categoria/Proteinas \
-            -o /tmp/productos-categoria.json
+            > /tmp/productos_categoria.json
 
-          if ! grep -q "Whey" /tmp/productos-categoria.json; then
-            echo "ERROR: el producto Whey no aparece en la categoría Proteinas."
-            cat /tmp/productos-categoria.json
+          if ! grep -q "Whey" /tmp/productos_categoria.json; then
+            echo "ERROR: El producto no aparece en el filtro por categoría."
+            cat /tmp/productos_categoria.json
             exit 1
           fi
 
-          echo "OK: todas las pruebas finalizaron correctamente."
+          echo "OK: La aplicación respondió y todas las pruebas finalizaron correctamente."
+
 
       - name: Logs si falla
         if: failure()
