@@ -160,20 +160,44 @@ jobs:
           docker compose logs --no-color --tail=100 postgres
 
 
-      - name: Smoke tests contra el balanceador
+      - name: Verificar aplicación y endpoints
+        working-directory: backend
+        env:
+          APP_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/supletanes-app:${{ github.sha }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
+          set -e
+
+          echo "Esperando a que la aplicación responda..."
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/actuator/health; then
+              break
+            fi
+            sleep 5
+          done
+
           curl -fsS http://localhost:8080/actuator/health
+
+          echo "Probando creación de producto..."
 
           code=$(curl -s -o /dev/null -w "%{http_code}" \
             -X POST http://localhost:8080/api/productos \
             -H "Content-Type: application/json" \
             -d '{"nombre":"Whey","descripcion":"Proteina","precio":25000,"stock":10,"categoria":"Proteinas"}')
 
-          [ "$code" = "201" ]
+          if [ "$code" != "201" ]; then
+            echo "ERROR: Se esperaba HTTP 201 y se recibió HTTP $code"
+            exit 1
+          fi
 
+          echo "Probando listado de productos..."
           curl -fsS http://localhost:8080/api/productos | grep -q "Whey"
 
+          echo "Probando filtro por categoría..."
           curl -fsS http://localhost:8080/api/productos/categoria/Proteinas | grep -q "Whey"
+
+          echo "OK: Todas las pruebas finalizaron correctamente."
 
       - name: Logs si falla
         if: failure()
