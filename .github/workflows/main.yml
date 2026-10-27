@@ -59,15 +59,24 @@ jobs:
       - name: Instalar Snyk CLI
         run: npm install -g snyk@latest
 
+
+      - name: Configurar Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - name: Dar permisos al Maven Wrapper
         run: chmod +x mvnw
 
+      - name: Instalar Snyk CLI
+        run: npm install --global snyk
+
       - name: Snyk dependencias
-        uses: snyk/actions/maven@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --file=backend/pom.xml --org=84f62d21-f0bd-460a-aff6-eff80a88eb01 --severity-threshold=high
+        run: snyk test --file=backend/pom.xml --org=84f62d21-f0bd-460a-aff6-eff80a88eb01 --severity-threshold=high
+
 
 
   # ─────────────── 2. Imagen: build, escaneo y push ───────────────
