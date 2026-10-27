@@ -73,9 +73,10 @@ jobs:
         run: npm install --global snyk
 
       - name: Snyk dependencias
+        working-directory: backend
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: snyk test --file=backend/pom.xml --org=84f62d21-f0bd-460a-aff6-eff80a88eb01 --severity-threshold=high
+        run: snyk test --file=pom.xml --org=84f62d21-f0bd-460a-aff6-eff80a88eb01 --severity-threshold=high
 
 
 
