@@ -56,12 +56,16 @@ jobs:
           -Dsonar.qualityGate.wait=true
           -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
 
-      - name: Snyk dependencias (bloquea con severidad High o Critical)
-        uses: snyk/actions/maven@master
+      - name: Instalar Snyk CLI
+        run: npm install -g snyk@latest
+
+      - name: Diagnosticar Snyk
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --severity-threshold=high --file=backend/pom.xml
+        run: |
+          snyk --version
+          snyk doctor
+          snyk test --debug --severity-threshold=high --file=backend/pom.xml
 
   # ─────────────── 2. Imagen: build, escaneo y push ───────────────
   build-scan-push:
