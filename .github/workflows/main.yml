@@ -223,14 +223,15 @@ jobs:
           echo "========== ESTADO INICIAL =========="
           docker compose ps -a
 
+
       - name: Verificar Spring Boot en cada contenedor
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          echo "========== VERIFICAR SPRING BOOT =========="
+          echo "========== ESPERAR SPRING BOOT =========="
 
-          intentos_maximos=3
+          intentos_maximos=60
           intento=1
           aplicacion_lista=false
 
@@ -269,7 +270,7 @@ jobs:
           done
 
           if [ "$aplicacion_lista" != true ]; then
-            echo "ERROR: Spring Boot no respondió después de 3 intentos."
+            echo "ERROR: Spring Boot no respondió dentro del tiempo permitido."
             echo "========== ESTADO DE LOS CONTENEDORES =========="
             docker compose ps -a
             echo "========== LOGS DE LA APLICACIÓN =========="
@@ -278,6 +279,7 @@ jobs:
             docker compose logs --tail=100 postgres
             exit 1
           fi
+
 
       - name: Diagnosticar estado y salud de los servicios
         if: always()
