@@ -129,10 +129,38 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Levantar el stack (espera healthchecks)
+
+      - name: Levantar el stack y diagnosticar errores
         run: |
           docker compose pull app
-          docker compose up -d --wait
+          docker compose up -d postgres
+
+          sleep 10
+
+          docker compose up -d --no-deps app || true
+
+          sleep 30
+
+          echo "========== ESTADO DE CONTENEDORES =========="
+          docker compose ps -a
+
+          echo "========== LOGS DE LA APLICACION =========="
+          docker compose logs --no-color --tail=200 app
+
+          echo "========== HEALTHCHECK DE LA APLICACION =========="
+          for container in $(docker compose ps -aq app); do
+            docker inspect "$container" \
+              --format='Nombre: {{.Name}} Estado: {{.State.Status}} Salud: {{if .State.Health}}{{.State.Health.Status}}{{else}}sin healthcheck{{end}}'
+
+            docker inspect "$container" \
+              --format='{{if .State.Health}}{{range .State.Health.Log}}{{println .Output}}{{end}}{{end}}'
+          done
+
+          echo "========== ESTADO DE POSTGRES =========="
+          docker compose logs --no-color --tail=100 postgres
+
+          exit 1
+
 
       - name: Smoke tests contra el balanceador
         run: |
