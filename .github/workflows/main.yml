@@ -59,11 +59,8 @@ jobs:
       - name: Instalar Snyk CLI
         run: npm install -g snyk@latest
 
-      - name: Buscar Maven Wrapper
-        run: |
-          echo "Buscando mvnw..."
-          find . -type f -name "mvnw"
-
+      - name: Dar permisos al Maven Wrapper
+        run: chmod +x mvnw
 
       - name: Snyk dependencias
         uses: snyk/actions/maven@master
