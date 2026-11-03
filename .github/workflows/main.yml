@@ -444,7 +444,7 @@ jobs:
 
     steps:
       - name: Crear issue con el fallo
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           TEST_QUALITY_RESULT: ${{ needs.test-quality.result }}
           BUILD_RESULT: ${{ needs.build-scan-push.result }}
